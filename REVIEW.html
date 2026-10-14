@@ -31,28 +31,42 @@ ul, ol { padding-left:1.5rem; }
 details { margin:1rem 0; } summary { cursor:pointer; color:var(--muted); font-size:.9rem; }
 </style></head><body><main>
 <h1>TRT-2949: Allow JIRA functionality to use SA OAuth auth</h1>
-<div class="meta"><a href="https://github.com/openshift-eng/ci-test-mapping/pull/885">openshift-eng/ci-test-mapping#885</a> · base <code>main</code> · head_sha <code>98ba9eec98c2</code> · reviewed_at <code>2026-10-13T11:47:43Z</code></div>
+<div class="meta"><a href="https://github.com/openshift-eng/ci-test-mapping/pull/885">openshift-eng/ci-test-mapping#885</a> · base <code>main</code> · head_sha <code>254aa1e7cc2f</code> · reviewed_at <code>2026-10-14T13:26:35Z</code></div>
 <div class="badges"><span class="badge c-green">verdict: approve</span></div>
 <h2>Verdict</h2>
-<p>Approve. The opt-in service-account OAuth path covers all Jira consumers in this repository, and the existing Bearer, Basic, and unauthenticated mapping behaviors remain selected when the flag is off. I found no spec mismatch or behavior defect; one low-priority duplicated request-reading path is noted below.</p>
+<p>Approve. No actionable findings in the current revision.</p>
+<p>The opt-in service-account OAuth path covers all three Jira commands while preserving legacy authentication selection. The blocking signal-handling regression reported against the earlier revision is addressed by removing global signal interception. The relevant package tests pass, including an uncached subprocess test confirming termination on the first SIGINT and SIGTERM while the real map-verify request is stalled. Live Atlassian access remains unverified.</p>
 <h2>What this PR does</h2>
 <ul>
-<li>Adds <code>--jira-service-account</code> to <code>map</code>, <code>jira-create</code>, and <code>jira-verify</code>.
+<li>Adds the default-false <code>--jira-service-account</code> flag to <code>map</code>, <code>jira-create</code>, and <code>jira-verify</code>.
 </li>
-<li>Shares Jira request construction and service-account OAuth configuration across those commands.
+<li>Shares Jira request construction and an OAuth client that obtains, caches, and replaces service-account access tokens.
 </li>
-<li>Keeps legacy Bearer and Basic credentials, plus unauthenticated Jira reads from <code>map</code>, when OAuth is not selected.
+<li>Preserves Bearer-then-Basic authentication and anonymous mapping reads when the flag is absent.
 </li>
-<li>Binds API calls, retry waits, and OAuth token renewal to command cancellation.
+<li>Propagates command context cancellation through Jira requests, retry waits, and token grants while retaining default CLI signal termination.
 </li>
-<li>Documents the Jira reads, credential setup, permissions, and rollout and rollback steps.
+<li>Documents credential configuration, scopes, project permissions, and rollout and rollback steps.
 </li></ul>
 <h2>Findings</h2>
+<p>No findings.</p>
+<h2>Resolved</h2>
+<h3><span class="tag c-red">blocking</span>Restore process termination for existing commands</h3>
+<ul>
+<li>where: <code>cmd/ci-test-mapping/ci-test-mapping.go:31-34</code>
+</li>
+<li>concern: The <a href="https://github.com/openshift-eng/ci-test-mapping/pull/885#issuecomment-6150649373">external review comment</a> demonstrated that revision <code>98ba9eec98c2825243a201ca8c718387a8226c19</code> intercepted SIGINT and SIGTERM globally while existing HTTP, BigQuery, and interactive OAuth paths could ignore the canceled context. Current revision <code>254aa1e7cc2f247a7b682524f1041efd250e5179</code> removes <code>signal.NotifyContext</code> and calls <code>rootCmd.Execute()</code>, restoring default process termination for those paths. <code>TestCLITerminationSignals</code> invokes the real <code>Execute</code> and <code>map-verify</code> implementations with a stalled transport and verifies termination by the first signal; both signal cases passed uncached.
+</li>
+<li>excerpt:<pre><code>err := rootCmd.Execute()
+if err != nil {
+    log.WithError(err).Fatal(&quot;could not execute root command&quot;)
+}</code></pre>
+</li></ul>
 <h3><span class="tag c-gray">nit</span>Share Jira metadata response handling</h3>
 <ul>
-<li>where: <code>cmd/ci-test-mapping/jira_create.go:68-76,124-132</code>
+<li>where: <code>cmd/ci-test-mapping/jira_create.go:68-76</code>
 </li>
-<li>concern: The two metadata readers each send the request, close its body, and read it into memory. A shared response-reading method on the Jira client would keep this lifecycle in one place; this is a low-priority cleanup, not a behavior defect.
+<li>concern: The earlier saved review suggested sharing the duplicated metadata response-reading lifecycle. This suggestion is withdrawn as a review finding: the current defect-first review established no concrete regression or meaningful maintainability defect from this duplication. The code remains unchanged in this respect.
 </li>
 <li>excerpt:<pre><code>resp, err := client.Do(req)
 if err != nil {
@@ -60,30 +74,32 @@ if err != nil {
 }
 defer resp.Body.Close()
 
-body, err := io.ReadAll(resp.Body)
-
-resp, err := client.Do(req)
-if err != nil {
-    return nil, err
-}
-defer resp.Body.Close()
-
 body, err := io.ReadAll(resp.Body)</code></pre>
 </li></ul>
-<h2>Standards</h2>
-<p>No repository-specific standards document was present. No hard standards violations were identified. The duplicated request-reading lifecycle above is a possible code smell, not a standards breach.</p>
-<h2>Spec</h2>
-<p>No spec findings. The PR description and linked Sippy PR #4095 call for explicit opt-in OAuth while preserving the legacy path when the flag is absent. All Jira HTTP consumers found in this repository are covered by the new flag and shared client.</p>
 <h2>Checked</h2>
 <ul>
-<li>Confirmed the worktree is at PR head <code>98ba9eec98c2825243a201ca8c718387a8226c19</code>, based on <code>main</code> at <code>7b06b90c499a53be163fd04985691614b63248d4</code>.
+<li>Reviewed the complete PR diff from merge base <code>7b06b90c499a53be163fd04985691614b63248d4</code> to PR head <code>254aa1e7cc2f247a7b682524f1041efd250e5179</code>, including command wiring, request paths, vendored OAuth code, tests, and documentation.
 </li>
-<li>Inspected the Jira request sites, authentication selection, command wiring, tests, and documentation. No tests were run.
+<li>Local <code>git rev-parse HEAD</code> reports <code>d2aa7b8e35a86a62161d7232c2a7cfb50e351aac</code>, an existing review-artifact-only commit directly atop the PR head. Frontmatter records the actual reviewed PR head so later refreshes compare the correct code revision.
 </li>
-<li>Confirmed the Atlassian token endpoint and Jira cloud gateway URL match <a href="https://support.atlassian.com/user-management/docs/create-oauth-2-0-credential-for-service-accounts/">Atlassian's service-account OAuth guidance</a>.
+<li>Checked all Jira call sites: the mapping component reader and both creation-metadata requests use the shared client and preserve the OAuth gateway prefix.
+</li>
+<li>Checked credential selection: the flag defaults to false, legacy Bearer credentials precede Basic credentials, service-account variables alone do not enable OAuth, and enabled OAuth fails without falling back to legacy credentials.
+</li>
+<li>Checked token reuse and replacement plus command-context cancellation against the implementation and existing tests.
+</li>
+<li>Passed <code>go test -mod=vendor ./pkg/jira ./pkg/jiraauth ./cmd/ci-test-mapping/flags ./cmd/ci-test-mapping</code>.
+</li>
+<li>Passed <code>go test -mod=vendor ./cmd/ci-test-mapping -run &#x27;^TestCLITerminationSignals$&#x27; -count=1 -v</code>; both <code>interrupt</code> and <code>terminated</code> subtests passed.
+</li>
+<li>Compared the signal-handling change directly against the revision cited in the external comment and confirmed that no production signal interception remains in repository Go code outside vendored dependencies.
+</li>
+<li>Confirmed the token grant format and gateway routing against <a href="https://support.atlassian.com/user-management/docs/create-oauth-2-0-credential-for-service-accounts/">Atlassian's service-account OAuth guidance</a>.
+</li>
+<li>Live credentials, gateway access, scopes, project permissions, and actual site responses were not tested. BigQuery operations and interactive Google OAuth were not exercised; removal of global signal interception addresses their shared termination regression.
 </li></ul>
 <h2>Open questions</h2>
 <ul>
-<li>Could you add the TRT-2949 acceptance criteria to the PR description or link an accessible issue reference? The full ticket text was unavailable in this worktree, so this review used the PR description and linked Sippy PRs.
+<li>Could you link accessible TRT-2949 acceptance criteria? The ticket text was unavailable; the review used the PR description as its specification.
 </li></ul>
 </main></body></html>
